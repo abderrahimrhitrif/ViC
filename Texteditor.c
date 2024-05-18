@@ -1,17 +1,28 @@
+/*** includes ***/
+
 #include <unistd.h>
 #include <termios.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <ctype.h>
 
+/*** data ***/
+
 struct termios orig_termios;
 
+/*** terminal ***/
+
+void die(const char * s){
+    perror(s);
+    exit(1);
+}
+
 void disableRawMode(){
-    tcsetattr(STDIN_FILENO,TCSAFLUSH, &orig_termios);
+    if(tcsetattr(STDIN_FILENO,TCSAFLUSH, &orig_termios) == -1) die("tcsetattr");
 } 
 
 void enableRawMode(){
-    tcgetattr(STDIN_FILENO, &orig_termios);
+    if(tcgetattr(STDIN_FILENO, &orig_termios) == -1) die("tcgetattr");
     atexit(disableRawMode);
 
     struct termios raw = orig_termios;
@@ -24,6 +35,8 @@ void enableRawMode(){
     raw.c_cc[VTIME] = 1;
     tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw);
 }
+
+/*** init ***/
 
 int main(){
 
