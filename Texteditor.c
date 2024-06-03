@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <ctype.h>
+#include <sys/types.h>
 #include <sys/ioctl.h>
 #include <errno.h>
 #include <string.h>
@@ -17,10 +18,17 @@
 
 /*** data ***/
 
+typedef struct erow {
+    int size;
+    char *chars;
+}erow;
+
 struct editorConfig {
     int cx, cy; // cursor position cords
     int screenrows;
     int screencols;
+    int numrows;
+    erow row;
     struct termios orig_termios;
 };
 
@@ -73,6 +81,32 @@ int getWindowSize(int *rows, int *cols){
     }
 }
 
+/*** file i/o ***/
+
+void editorOpen(char *filename) {
+    FILE *fp = fopen(filename, "r");
+    if(!fp) die("fopen");
+
+    char *line = NULL;
+    size_t linecap = 0;
+    ssize_t linelen;
+    linelen = getline(&line, &linecap,fp);
+    if(linelen != -1){
+        while(linelen > 0 && (line[linelen - 1] == '\n' || line[linelen - 1] == '\n')){
+            linelen--;
+        }
+        E.row.size = linelen;
+        E.row.chars = malloc(linelen + 1);
+        memcpy(E.row.chars, line, linelen);
+        E.row.chars[linelen] = '\0';
+        E.numrows = 1;
+    }
+    free(line);
+    fclose(fp);
+}
+
+/*** append buffer ***/
+
 struct abuf {
     char *b;
     int len;
@@ -83,6 +117,7 @@ struct abuf {
 void initEditor(){
     E.cx = 0;
     E.cy = 0;
+    E.numrows = 0;
 
     if(getWindowSize(&E.screenrows, &E.screencols) == -1) die("getWindowSize");
 }
@@ -105,20 +140,27 @@ void abFree(struct abuf *ab){
 void editorDrawsRows(struct abuf *ab){
     int y;
     for(y = 0; y< E.screenrows; y++){
-        if(y == E.screenrows / 3){
-            char welcome[80];
-            int welcomelen = snprintf(welcome, sizeof(welcome), "ViC editor -- version %s", VIC_VERSION);
-            int padding = (E.screencols - welcomelen) / 2;
-            if (padding){
-                abAppend(ab, "~", 1);
-                padding--;
+        if(y>= E.numrows){
+            if(E.numrows == 0 && y == E.screenrows / 3){
+                char welcome[80];
+                int welcomelen = snprintf(welcome, sizeof(welcome), "ViC editor -- version %s", VIC_VERSION);
+                int padding = (E.screencols - welcomelen) / 2;
+                if (padding){
+                    abAppend(ab, "~", 1);
+                    padding--;
+                }
+                while (padding--) abAppend(ab, " ", 1);
+                if (welcomelen > E.screencols) welcomelen = E.screencols;
+                abAppend(ab, welcome, welcomelen);
             }
-            while (padding--) abAppend(ab, " ", 1);
-            if (welcomelen > E.screencols) welcomelen = E.screencols;
-            abAppend(ab, welcome, welcomelen);
+            else{
+                abAppend(ab, "~", 1);
+            }
         }
         else{
-            abAppend(ab, "~", 1);
+            int len = E.row.size;
+            if(len > E.screencols) len = E.screencols;
+            abAppend(ab, E.row.chars, len);
         }
 
         abAppend(ab, "\x1b[K", 3);
@@ -174,7 +216,6 @@ void editorProcessKeypress(){
     case CTRL_KEY('q'):
         write(STDOUT_FILENO, "\x1b[H", 3); //move cursor to home position
         write(STDOUT_FILENO, "\x1b[2J", 4); //clear the screen
-        system("clear");
 
         exit(0);
         break;
@@ -190,10 +231,11 @@ void editorProcessKeypress(){
 
 /*** init ***/
 
-int main(){
+int main(int argc, char *argv[]){
 
     enableRawMode();
     initEditor();
+    if (argc >= 2) editorOpen(argv[1]);
 
     while (1){
         editorRefreshScreen();
